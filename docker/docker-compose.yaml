@@ -1,0 +1,65 @@
+services:
+  pgsql17:
+    image: registry.cn-hangzhou.aliyuncs.com/yumtown/postgres:17
+    container_name: pgsql17
+    environment:
+      - POSTGRES_DB=postgres
+      - POSTGRES_USER=odoo
+      - POSTGRES_PASSWORD=odoo
+      - PGDATA=/var/lib/postgresql/data
+    volumes:
+      - odoo-db-data:/var/lib/postgresql/data
+    restart: always
+    healthcheck:
+      test: [ "CMD", "pg_isready" ]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+
+  odoo18:
+    image: registry.cn-hangzhou.aliyuncs.com/yumtown/odoo:18
+    container_name: odoo18
+    user: root
+    depends_on:
+      - pgsql17
+    volumes:
+      - ./odoo:/app/odoo18
+    environment:
+      - ODOO_RC=/app/odoo18/odoo.conf
+      - HOST=pgsql17
+      - USER=odoo
+      - PASSWORD=odoo
+
+  nginx:
+    image: registry.cn-hangzhou.aliyuncs.com/yumtown/nginx:latest
+    container_name: nginx
+    depends_on:
+      - odoo18
+    environment:
+      - ODOO_HOST=$ODOO_HOST
+    volumes:
+      - ./nginx/log:/var/log/nginx
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./certbot/www:/var/www/certbot
+      - ./certbot/conf:/etc/letsencrypt
+    ports:
+      - 80:80
+      - 443:443
+    command: >
+      sh -c "envsubst '$${ODOO_HOST}' < /etc/nginx/conf.d/odoo.conf.template > /etc/nginx/conf.d/odoo.conf
+      && nginx -g 'daemon off;'"
+
+  certbot:
+    image: registry.cn-hangzhou.aliyuncs.com/yumtown/certbot:v4.0.0
+    container_name: certbot
+    volumes:
+      - ./certbot/www:/var/www/certbot
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/log:/var/log/letsencrypt
+    command: certonly --webroot -w /var/www/certbot --agree-tos --no-eff-email --force-renewal -d $ODOO_HOST
+    # 续期证书（取消注释以启用自动续期）
+    # command: renew --quiet --no-self-upgrade
+    # restart: unless-stopped
+
+volumes:
+  odoo-db-data:
